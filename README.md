@@ -67,7 +67,7 @@ fly deploy -c fly.toml
 fly apps create pokequant-web && fly deploy -c fly.web.toml
 ```
 
-The Next.js server reaches the API over Fly's private network (`http://pokequant-api.flycast`); browsers use
+The Next.js server reaches the API over Fly's private network (`http://api.process.pokequant-api.internal:8000`); browsers use
 `https://pokequant-api.fly.dev` (baked in at build time via `NEXT_PUBLIC_API_URL`). Update `CORS_ORIGINS`
 in `fly.toml` if you rename the web app.
 

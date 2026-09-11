@@ -3,8 +3,10 @@
 #   fly apps create pokequant-web
 #   fly deploy -c fly.web.toml
 #
-# Server components call the API over the private network (API_INTERNAL_URL, flycast);
-# the browser talks to the public API hostname (NEXT_PUBLIC_API_URL, baked at build time).
+# Server components call the API over the private 6PN network (API_INTERNAL_URL) using the
+# process-group DNS name so only `api` machines (not workers) are targeted. Flycast is NOT used
+# here: `force_https` on the API's http_service would 301 plain-HTTP flycast requests to HTTPS.
+# The browser talks to the public API hostname (NEXT_PUBLIC_API_URL, baked at build time).
 
 app            = "pokequant-web"
 primary_region = "iad"
@@ -24,7 +26,7 @@ kill_timeout   = "20s"
 [env]
   PORT                = "3000"
   HOSTNAME            = "0.0.0.0"
-  API_INTERNAL_URL    = "http://pokequant-api.flycast"
+  API_INTERNAL_URL    = "http://api.process.pokequant-api.internal:8000"
   NEXT_PUBLIC_API_URL = "https://pokequant-api.fly.dev"
 
 [http_service]

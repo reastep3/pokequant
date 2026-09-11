@@ -1,0 +1,57 @@
+# infra/postgres/fly.toml — self-hosted TimescaleDB on a persistent volume.
+#
+# Use this INSTEAD of `fly postgres create` when you want the timescaledb extension
+# (hypertables, compression, continuous aggregates — see backend/alembic/versions/0001).
+#
+#   fly apps create pokequant-db
+#   fly volumes create pokequant_pgdata --region iad --size 10 -a pokequant-db
+#   fly secrets set -a pokequant-db POSTGRES_PASSWORD=$(openssl rand -hex 24)
+#   fly deploy -c infra/postgres/fly.toml
+#   fly secrets set -a pokequant-api DATABASE_URL="postgresql+asyncpg://pokequant:<pw>@pokequant-db.internal:5432/pokequant"
+#
+# No public ports are exposed: the database is reachable only over the org's private
+# 6PN network (pokequant-db.internal). Snapshot policy: Fly takes daily volume snapshots
+# (retained 5 days by default); raise with `fly volumes update --snapshot-retention 14`.
+
+app            = "pokequant-db"
+primary_region = "iad"
+kill_signal    = "SIGINT"     # postgres fast shutdown
+kill_timeout   = "60s"
+
+[build]
+  image = "timescale/timescaledb:2.17.2-pg16"
+
+[deploy]
+  strategy = "immediate"      # single stateful machine; rolling has nothing to roll over
+
+[env]
+  PGDATA            = "/data/pgdata"
+  POSTGRES_DB       = "pokequant"
+  POSTGRES_USER     = "pokequant"
+  TS_TUNE_MEMORY    = "1800MB"
+  TS_TUNE_NUM_CPUS  = "2"
+  # POSTGRES_PASSWORD comes from `fly secrets`
+
+[[mounts]]
+  source                     = "pokequant_pgdata"
+  destination                = "/data"
+  initial_size               = "10gb"
+  auto_extend_size_threshold = 80
+  auto_extend_size_increment = "5gb"
+  auto_extend_size_limit     = "100gb"
+
+[checks]
+  [checks.pg]
+    type         = "tcp"
+    port         = 5432
+    interval     = "15s"
+    timeout      = "5s"
+    grace_period = "30s"
+
+[[vm]]
+  memory   = "2gb"
+  cpu_kind = "shared"
+  cpus     = 2
+
+[[restart]]
+  policy = "always"

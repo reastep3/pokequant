@@ -1,0 +1,42 @@
+[project]
+name = "pokequant-api"
+version = "0.1.0"
+description = "Quantitative alternative-asset terminal for Pokémon TCG graded slabs and sealed product"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+  "sqlalchemy[asyncio]>=2.0.36",
+  "asyncpg>=0.30",
+  "aiosqlite>=0.20",
+  "alembic>=1.13",
+  "pydantic>=2.9",
+  "pydantic-settings>=2.5",
+  "redis>=5.1",
+  "httpx>=0.27",
+  "numpy>=2.0",
+  "scipy>=1.14",
+  "pandas>=2.2",
+  "orjson>=3.10",
+]
+
+[project.optional-dependencies]
+rl = ["torch>=2.4"]
+dev = ["pytest>=8", "pytest-asyncio>=0.24", "ruff>=0.6", "mypy>=1.11", "pip-tools>=7"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "ASYNC"]
+ignore = ["E501", "B008", "UP042"]  # B008: FastAPI Depends idiom; UP042: (str, Enum) keeps SQLAlchemy Enum + JSON friendly
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true

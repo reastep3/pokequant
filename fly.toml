@@ -1,0 +1,94 @@
+# fly.toml — PokéQuant API + worker (one app, two process groups, one image)
+#
+# One-time setup:
+#   fly apps create pokequant-api
+#   fly postgres create --name pokequant-db --region iad --vm-size shared-cpu-2x --volume-size 10   # managed path
+#     (or self-host TimescaleDB with infra/postgres/fly.toml — see README)
+#   fly postgres attach pokequant-db -a pokequant-api          # injects DATABASE_URL (postgres://...)
+#   fly redis create --name pokequant-cache --region iad       # Upstash; copy the URL:
+#   fly secrets set -a pokequant-api REDIS_URL=redis://... API_KEY=$(openssl rand -hex 24) \
+#       PPT_API_KEY=... PARSEBOT_API_KEY=...
+#   fly ips allocate-v6 --private -a pokequant-api             # flycast: private LB for the Next.js server
+#   fly volumes create pokequant_models --region iad --size 3 -a pokequant-api
+#   fly deploy
+#
+# NOTE: `fly postgres attach` sets DATABASE_URL as postgres://; SQLAlchemy needs the asyncpg
+# driver, so app/config.py rewrites postgres:// -> postgresql+asyncpg:// at load time.
+
+app            = "pokequant-api"
+primary_region = "iad"
+kill_signal    = "SIGTERM"
+kill_timeout   = "30s"
+
+[build]
+  dockerfile   = "Dockerfile"
+  build-target = "api"
+
+[deploy]
+  strategy        = "rolling"
+  max_unavailable = 0.34
+  release_command = "alembic upgrade head"
+
+[env]
+  APP_ENV                  = "production"
+  LOG_LEVEL                = "INFO"
+  PORT                     = "8000"
+  CORS_ORIGINS             = "https://pokequant-web.fly.dev"
+  WORKER_ENABLED           = "true"
+  PRICE_INGEST_INTERVAL_S  = "86400"
+  POP_INGEST_INTERVAL_S    = "21600"
+  ANALYTICS_INTERVAL_S     = "3600"
+  MODEL_DIR                = "/data/models"
+
+[processes]
+  api    = "uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2 --proxy-headers --forwarded-allow-ips=*"
+  worker = "python -m app.workers"
+
+# Public HTTPS edge -> api machines only. Private consumers (the Next.js server) use
+# http://pokequant-api.flycast (proxy-balanced, same http_service, never leaves the 6PN).
+[http_service]
+  internal_port        = 8000
+  force_https          = true
+  auto_stop_machines   = "off"     # SSE stream + warm cache; never scale to zero
+  auto_start_machines  = true
+  min_machines_running = 1
+  processes            = ["api"]
+
+  [http_service.concurrency]
+    type       = "requests"
+    soft_limit = 200
+    hard_limit = 400
+
+  [[http_service.checks]]
+    grace_period = "15s"
+    interval     = "15s"
+    timeout      = "5s"
+    method       = "GET"
+    path         = "/ready"
+
+# Persistent scratch for the worker: DQN checkpoints, parquet snapshots of oracle pulls.
+[[mounts]]
+  source                      = "pokequant_models"
+  destination                 = "/data"
+  processes                   = ["worker"]
+  initial_size                = "3gb"
+  auto_extend_size_threshold  = 80
+  auto_extend_size_increment  = "1gb"
+  auto_extend_size_limit      = "10gb"
+
+[[vm]]
+  processes = ["api"]
+  memory    = "1gb"
+  cpu_kind  = "shared"
+  cpus      = 2
+
+[[vm]]
+  processes = ["worker"]
+  memory    = "2gb"
+  cpu_kind  = "shared"
+  cpus      = 2
+
+[[restart]]
+  policy      = "on-failure"
+  retries     = 10
+  processes   = ["worker"]

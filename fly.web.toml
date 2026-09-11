@@ -1,0 +1,52 @@
+# fly.web.toml — Next.js terminal UI.   Deploy with:  fly deploy -c fly.web.toml
+#
+#   fly apps create pokequant-web
+#   fly deploy -c fly.web.toml
+#
+# Server components call the API over the private network (API_INTERNAL_URL, flycast);
+# the browser talks to the public API hostname (NEXT_PUBLIC_API_URL, baked at build time).
+
+app            = "pokequant-web"
+primary_region = "iad"
+kill_signal    = "SIGTERM"
+kill_timeout   = "20s"
+
+[build]
+  dockerfile   = "Dockerfile"
+  build-target = "web"
+  [build.args]
+    NEXT_PUBLIC_API_URL = "https://pokequant-api.fly.dev"
+
+[deploy]
+  strategy        = "rolling"
+  max_unavailable = 0.5
+
+[env]
+  PORT                = "3000"
+  HOSTNAME            = "0.0.0.0"
+  API_INTERNAL_URL    = "http://pokequant-api.flycast"
+  NEXT_PUBLIC_API_URL = "https://pokequant-api.fly.dev"
+
+[http_service]
+  internal_port        = 3000
+  force_https          = true
+  auto_stop_machines   = "suspend"
+  auto_start_machines  = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type       = "requests"
+    soft_limit = 100
+    hard_limit = 250
+
+  [[http_service.checks]]
+    grace_period = "10s"
+    interval     = "15s"
+    timeout      = "5s"
+    method       = "GET"
+    path         = "/"
+
+[[vm]]
+  memory   = "512mb"
+  cpu_kind = "shared"
+  cpus     = 1

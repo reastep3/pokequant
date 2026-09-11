@@ -70,13 +70,9 @@ def upgrade() -> None:
             "SELECT add_continuous_aggregate_policy('sales_daily', start_offset => INTERVAL '90 days', "
             "end_offset => INTERVAL '1 hour', schedule_interval => INTERVAL '1 hour', if_not_exists => TRUE)"
         )
-    else:
-        # Plain PostgreSQL: BRIN on ts is already declared in the model; add a partial
-        # index for the screener's "latest snapshot" lookup.
-        op.execute(
-            "CREATE INDEX IF NOT EXISTS ix_analytics_snapshots_recent ON analytics_snapshots (asset_id, grade_key, ts DESC) "
-            "WHERE ts > now() - INTERVAL '14 days'"
-        )
+    # Plain PostgreSQL (managed Fly Postgres): the BRIN index on ts and the
+    # (asset_id, grade_key, ts DESC) composite indexes declared on the models are sufficient;
+    # a now()-relative partial index is not allowed (predicate functions must be IMMUTABLE).
 
 
 def downgrade() -> None:

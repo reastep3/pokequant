@@ -299,8 +299,8 @@ async def run_analytics(session: AsyncSession, settings: Settings | None = None,
             if out:
                 rows.append(_snapshot_row(a.id, out, now))
         n = await upsert(session, AnalyticsSnapshot, rows, ["asset_id", "grade_key", "ts"],
-                         [c for c in SNAPSHOT_COLUMNS if c not in {"asset_id", "grade_key", "ts"}])
-        ctx.run.rows_written = n
+                         [c for c in SNAPSHOT_COLUMNS if c not in {"asset_id", "grade_key", "ts"}], commit_each=True)
+        ctx.rows_written = n
         await generate_signals(session, rows, s)
     return n
 

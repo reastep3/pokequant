@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from pydantic import Field, field_validator
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -14,7 +14,8 @@ class Settings(BaseSettings):
     app_env: str = "development"
     log_level: str = "INFO"
     api_key: str = "change-me-admin-key"
-    cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000"])
+    # Plain comma-separated string: pydantic-settings would JSON-decode a list[str] from the env.
+    cors_origins: str = "http://localhost:3000"
 
     # Persistence. SQLite fallback keeps `make dev` zero-dependency.
     database_url: str = "sqlite+aiosqlite:///./dev.db"
@@ -51,19 +52,30 @@ class Settings(BaseSettings):
     @field_validator("database_url", mode="before")
     @classmethod
     def _asyncpg_driver(cls, v: object) -> object:
-        """`fly postgres attach` injects postgres://...; SQLAlchemy needs the asyncpg dialect."""
-        if isinstance(v, str):
-            for prefix in ("postgres://", "postgresql://"):
-                if v.startswith(prefix):
-                    return "postgresql+asyncpg://" + v[len(prefix):]
+        """Normalize a libpq-style URL for SQLAlchemy+asyncpg.
+
+        `fly postgres attach` injects `postgres://...?sslmode=disable`; asyncpg has no `sslmode`
+        kwarg (it uses `ssl=`), so the scheme is rewritten and `sslmode` is translated.
+        """
+        if not isinstance(v, str):
+            return v
+        from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+        for prefix in ("postgres://", "postgresql://"):
+            if v.startswith(prefix):
+                v = "postgresql+asyncpg://" + v[len(prefix):]
+        if v.startswith("postgresql+asyncpg://"):
+            parts = urlsplit(v)
+            q = dict(parse_qsl(parts.query))
+            mode = q.pop("sslmode", None)
+            if mode and "ssl" not in q:
+                q["ssl"] = mode  # asyncpg accepts libpq sslmode strings via its `ssl` kwarg
+            v = urlunsplit(parts._replace(query=urlencode(q)))
         return v
 
-    @field_validator("cors_origins", mode="before")
-    @classmethod
-    def _split_origins(cls, v: object) -> object:
-        if isinstance(v, str):
-            return [o.strip() for o in v.split(",") if o.strip()]
-        return v
+    @property
+    def cors_origin_list(self) -> list[str]:
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 
     @property
     def is_sqlite(self) -> bool:

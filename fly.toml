@@ -41,7 +41,7 @@ kill_timeout   = "30s"
   MODEL_DIR                = "/data/models"
 
 [processes]
-  api    = "uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2 --proxy-headers --forwarded-allow-ips=*"
+  api    = "uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1 --proxy-headers --forwarded-allow-ips=*"
   worker = "python -m app.workers"
 
 # Public HTTPS edge -> api machines only. Private consumers (the Next.js server) use
@@ -76,17 +76,19 @@ kill_timeout   = "30s"
   auto_extend_size_increment  = "1gb"
   auto_extend_size_limit      = "10gb"
 
+# Sized for a first deploy (~$10/mo total); `fly scale vm shared-cpu-2x --memory 2048 --process-group worker` when
+# the universe grows past a few hundred assets.
 [[vm]]
   processes = ["api"]
-  memory    = "1gb"
+  memory    = "512mb"
   cpu_kind  = "shared"
-  cpus      = 2
+  cpus      = 1
 
 [[vm]]
   processes = ["worker"]
-  memory    = "2gb"
+  memory    = "1gb"
   cpu_kind  = "shared"
-  cpus      = 2
+  cpus      = 1
 
 [[restart]]
   policy      = "on-failure"

@@ -50,10 +50,19 @@ async def upsert(
     rows: Iterable[dict[str, Any]],
     conflict_cols: list[str],
     update_cols: list[str] | None = None,
-    chunk: int = 1000,
+    chunk: int = 250,
+    commit_each: bool = False,
 ) -> int:
-    """INSERT ... ON CONFLICT for both PG and SQLite. Returns rows submitted."""
-    rows = list(rows)
+    """INSERT ... ON CONFLICT for both PG and SQLite. Returns rows submitted.
+
+    Rows are de-duplicated on the conflict key (last wins): PostgreSQL rejects a batch that
+    touches the same row twice under ON CONFLICT DO UPDATE. ``commit_each`` commits per chunk so
+    bulk backfills don't hold one giant transaction open against a small database machine.
+    """
+    dedup: dict[tuple, dict[str, Any]] = {}
+    for r in rows:
+        dedup[tuple(r.get(c) for c in conflict_cols)] = r
+    rows = list(dedup.values())
     if not rows:
         return 0
     # Multi-row VALUES requires a uniform key set; pad sparse dicts with NULLs.
@@ -74,4 +83,6 @@ async def upsert(
             stmt = stmt.on_conflict_do_nothing(index_elements=conflict_cols)
         await session.execute(stmt)
         n += len(batch)
+        if commit_each:
+            await session.commit()
     return n

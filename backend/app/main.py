@@ -40,7 +40,7 @@ def create_app() -> FastAPI:
     app = FastAPI(title="PokéQuant API", version=__version__, lifespan=lifespan,
                   docs_url="/docs" if s.app_env != "production" else None)
     app.add_middleware(GZipMiddleware, minimum_size=1024)
-    app.add_middleware(CORSMiddleware, allow_origins=s.cors_origins, allow_methods=["*"], allow_headers=["*"])
+    app.add_middleware(CORSMiddleware, allow_origins=s.cors_origin_list, allow_methods=["*"], allow_headers=["*"])
     app.include_router(health_router)
     app.include_router(api_router)
     return app

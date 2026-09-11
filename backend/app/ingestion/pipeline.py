@@ -53,24 +53,32 @@ async def load_refs(session: AsyncSession, only_cards: bool = False) -> list[Ass
 
 
 class IngestionRunCtx:
+    """Audit wrapper: writes an `ingestion_runs` row for success *or* failure.
+
+    On failure the session is rolled back first (a failed flush leaves it unusable), then a fresh
+    audit row is written. Exceptions are swallowed so the scheduler keeps running.
+    """
+
     def __init__(self, session: AsyncSession, job: str):
-        self.session, self.job, self.run = session, job, None
+        self.session, self.job = session, job
+        self.started = datetime.now(UTC)
+        self.rows_written = 0
 
     async def __aenter__(self) -> IngestionRunCtx:
-        self.run = IngestionRun(job=self.job, started_at=datetime.now(UTC))
-        self.session.add(self.run)
-        await self.session.flush()
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> bool:
-        assert self.run is not None
-        self.run.finished_at = datetime.now(UTC)
-        self.run.status = "error" if exc else "ok"
+        finished = datetime.now(UTC)
         if exc:
-            self.run.error = f"{exc_type.__name__}: {exc}"[:2000]
             log.exception("job %s failed", self.job)
+            await self.session.rollback()
+            status, error = "error", f"{exc_type.__name__}: {exc}"[:2000]
+        else:
+            status, error = "ok", None
+        self.session.add(IngestionRun(job=self.job, started_at=self.started, finished_at=finished, status=status,
+                                      rows_written=self.rows_written, error=error))
         await self.session.commit()
-        return True  # swallow: the audit row carries the failure; scheduler keeps running
+        return True
 
 
 def _tick_rows(points: list[PricePoint]) -> list[dict]:
@@ -104,17 +112,17 @@ async def run_price_ingest(session: AsyncSession, settings: Settings | None = No
         for oracle in oracles["prices"]:
             points = await oracle.fetch_prices(refs, since=since)
             written += await upsert(session, PriceTick, _tick_rows(points), ["asset_id", "grade_key", "source", "ts"],
-                                    ["price", "low", "high", "volume", "n_listings", "bid", "ask", "meta"])
+                                    ["price", "low", "high", "volume", "n_listings", "bid", "ask", "meta"], commit_each=True)
         for oracle in oracles["sales"]:
             sales = await oracle.fetch_sales(refs, since=since)
             rows = [dict(asset_id=x.asset_id, grade_key=x.grade_key, ts=x.ts, price=x.price, currency=x.currency,
                          source=x.source, external_id=x.external_id, cert_number=x.cert_number, meta=x.meta) for x in sales]
-            written += await upsert(session, Sale, rows, ["source", "external_id"])
+            written += await upsert(session, Sale, rows, ["source", "external_id"], commit_each=True)
             written += await upsert(session, PriceTick, _tick_rows(aggregate_sales(sales)),
-                                    ["asset_id", "grade_key", "source", "ts"], ["price", "low", "high", "volume"])
+                                    ["asset_id", "grade_key", "source", "ts"], ["price", "low", "high", "volume"], commit_each=True)
         for o in {*oracles["prices"], *oracles["sales"]}:
             await o.aclose()
-        ctx.run.rows_written = written
+        ctx.rows_written = written
     return written
 
 
@@ -132,7 +140,7 @@ async def run_pop_ingest(session: AsyncSession, settings: Settings | None = None
                 rows.append(dict(asset_id=p.asset_id, grader=p.grader, ts=p.ts, grade_counts=p.grade_counts,
                                  total=p.total, gem_rate=(tens / p.total) if p.total else None, source=p.source, meta=p.meta))
             written += await upsert(session, PopReport, rows, ["asset_id", "grader", "ts"],
-                                    ["grade_counts", "total", "gem_rate", "meta"])
+                                    ["grade_counts", "total", "gem_rate", "meta"], commit_each=True)
             await oracle.aclose()
-        ctx.run.rows_written = written
+        ctx.rows_written = written
     return written
